@@ -1,0 +1,29 @@
+# Vergelijkt de skills elke maand met hun bron (bronnen.txt) en opent een PR als er iets veranderd is.
+# Vereist: Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests".
+name: Skills bijwerken
+
+on:
+  schedule:
+    - cron: '23 5 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bijwerken:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          grep -v '^#' bronnen.txt | while read -r skill url; do
+            [ -n "$skill" ] && curl -fsS "$url" -o "skills/$skill/SKILL.md"
+          done
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: skills/bijwerken
+          commit-message: Skills bijwerken vanaf de bron
+          title: Skills bijwerken vanaf de bron
+          body: Een of meer skills zijn bij de bron veranderd (zie `bronnen.txt`). Bekijk het verschil voor je merget; na de merge krijgen de projecten het via hun wekelijkse sync.
+          delete-branch: true

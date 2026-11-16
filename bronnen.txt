@@ -1,0 +1,4 @@
+# skill  url van de bron (SKILL.md). Gebruikt door .github/workflows/skills-bijwerken.yml
+ponytail https://raw.githubusercontent.com/DietrichGebert/ponytail/HEAD/skills/ponytail/SKILL.md
+grilling https://raw.githubusercontent.com/mattpocock/skills/HEAD/skills/productivity/grilling/SKILL.md
+grill-me https://raw.githubusercontent.com/mattpocock/skills/HEAD/skills/productivity/grill-me/SKILL.md

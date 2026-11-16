@@ -1,0 +1,31 @@
+# Haalt elke week de basis-werkafspraken uit lexdenotter/claude-basis op en opent een PR als er iets veranderd is.
+# Kopieer dit bestand naar .github/workflows/claude-basis.yml in het project.
+# Vereist: Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests".
+name: Claude-basis bijwerken
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: lexdenotter/claude-basis
+          path: .claude-basis-tmp
+      - run: bash .claude-basis-tmp/sync.sh .claude-basis-tmp && rm -rf .claude-basis-tmp
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: claude-basis/bijwerken
+          commit-message: Claude-basis bijwerken
+          title: Claude-basis bijwerken
+          body: Nieuwe versie van de basis-werkafspraken en skills uit [lexdenotter/claude-basis](https://github.com/lexdenotter/claude-basis).
+          delete-branch: true

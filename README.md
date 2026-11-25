@@ -17,6 +17,7 @@ bron van de skills (Ponytail, mattpocock/skills)
 | `bronnen.txt` | Waar elke skill vandaan komt, voor de maandelijkse controle |
 | `sync.sh` | Zet de basis in een project. Raakt alleen skills die uit de basis komen (`.claude/basis/skills.txt`) |
 | `sync/claude-basis.yml` | De sync-Action om in een project te zetten |
+| `sync/controle-node.yml` | Sjabloon voor de PR-controle (typecheck, tests, build) in een Node-project. Wordt niet gesynct; je kopieert hem één keer |
 
 ## De basis in een project zetten
 
@@ -31,8 +32,9 @@ Vraag Claude in het project: "zet de claude-basis erin". De stappen:
    @.claude/basis/CLAUDE.md
    ```
    Haal regels die al in de basis staan uit het project weg. Afwijkingen schrijf je als "Afwijking van de basis: …".
-5. Open een PR.
-6. De gebruiker zet in het project aan: *Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"*.
+5. Heeft het project nog geen PR-controle, zet er dan een neer: kopieer `sync/controle-node.yml` naar `.github/workflows/controle.yml` en pas de stappen aan op de scripts van het project (of schrijf een passende workflow als het geen Node-project is).
+6. Open een PR.
+7. De gebruiker zet in het project aan: *Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"*.
 
 ## Een skill toevoegen
 

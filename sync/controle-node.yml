@@ -1,0 +1,32 @@
+# Draait typecheck, tests en build op elke pull request, zodat een fout vóór het mergen opvalt.
+# Kopieer dit bestand naar .github/workflows/controle.yml in een Node-project en pas de stappen aan op de scripts van het project.
+# Vereist in package.json de scripts: typecheck, test en build. Heeft een project er een niet, haal dan die stap weg.
+name: Controle
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: controle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  controle:
+    name: Typecheck, tests en build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

@@ -18,6 +18,7 @@ bron van de skills (Ponytail, mattpocock/skills)
 | `sync.sh` | Zet de basis in een project. Raakt alleen skills die uit de basis komen (`.claude/basis/skills.txt`) |
 | `sync/claude-basis.yml` | De sync-Action om in een project te zetten |
 | `sync/controle-node.yml` | Sjabloon voor de PR-controle (typecheck, tests, build) in een Node-project. Wordt niet gesynct; je kopieert hem één keer |
+| `sync/deploy-rsync.yml` | Sjabloon voor de deploy naar de eigen server (rsync over SSH, met rooktest). Wordt niet gesynct; je kopieert hem één keer naar `.github/workflows/deploy.yml` |
 
 ## De basis in een project zetten
 

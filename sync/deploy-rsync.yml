@@ -1,0 +1,213 @@
+# Sjabloon: zet een statische site of PWA bij elke push naar main via SSH + rsync op de eigen server (Caddy).
+# Kopieer naar .github/workflows/deploy.yml in een project en vul hieronder SITE_FILES (en eventueel BUILD) in.
+# Op de server, eenmalig: maak /opt/<project> aan, eigendom van de deploy-gebruiker, met daarin het lege
+# markerbestand .deploy-doel (`touch /opt/<project>/.deploy-doel`), plus een caddy-sites-bestand (zie de basis-CLAUDE.md).
+# Secrets: DEPLOY_HOST, DEPLOY_PATH, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS. Variables: DEPLOY_USER, DEPLOY_URL, optioneel DEPLOY_PORT.
+name: Deploy naar server
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Expliciete lijst van wat naar de server gaat. Een map met "/." erachter kopieert alleen de inhoud.
+  # Zonder build:  SITE_FILES: index.html sw.js styles.css manifest.webmanifest js icons
+  # Vite/React:    SITE_FILES: dist/.
+  SITE_FILES: index.html
+  # Build-opdracht vóór het kopiëren; leeg laten als er niets te bouwen is. Bijv.: npm ci && npm run build
+  BUILD: ""
+
+jobs:
+  deploy:
+    name: Deploy via rsync
+    # Alleen main deployen, ook als de workflow handmatig op een andere branch wordt gestart.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      # Gebruiker en poort zijn variables, geen secrets: GitHub maskeert secretwaarden zoals "deploy" overal in de logs.
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+    steps:
+      - name: Code ophalen
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Secrets en variables controleren
+        run: |
+          fout=0
+          for name in DEPLOY_HOST DEPLOY_PATH DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Secret ontbreekt::Stel het secret $name in via Settings > Secrets and variables > Actions, tab Secrets (zie README)."
+              fout=1
+            fi
+          done
+          if [ -z "$DEPLOY_USER" ]; then
+            echo "::error title=Variable ontbreekt::Stel de variable DEPLOY_USER in via Settings > Secrets and variables > Actions, tab Variables (zie README)."
+            fout=1
+          fi
+          # Host en gebruiker komen in de ssh-config terecht: alleen veilige tekens toestaan.
+          if [ -n "$DEPLOY_HOST" ] && ! [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.:-]+$ ]]; then
+            echo "::error title=Ongeldige DEPLOY_HOST::Alleen een hostnaam of IP-adres (letters, cijfers, punt, dubbele punt, streepje)."
+            fout=1
+          fi
+          if [ -n "$DEPLOY_USER" ] && ! [[ "$DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error title=Ongeldige DEPLOY_USER::Alleen letters, cijfers, punt, liggend streepje en streepje."
+            fout=1
+          fi
+          if [ -n "$DEPLOY_PORT" ] && ! [[ "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]]; then
+            echo "::error title=Ongeldige poort::De variable DEPLOY_PORT moet een getal zijn (of leeg laten voor 22)."
+            fout=1
+          fi
+          if [ -n "$DEPLOY_PATH" ]; then
+            p="$(printf '%s' "$DEPLOY_PATH" | sed 's:/*$::')"
+            # Absoluut, minstens twee niveaus, alleen veilige tekens, geen lege (//) of ./..-segmenten.
+            if [ -z "$p" ] || ! [[ "$p" =~ ^/[A-Za-z0-9._/-]+$ ]] || [[ "$p" == *//* ]] \
+               || [[ "/$p/" =~ /\.{1,2}/ ]] || [[ "$p" =~ ^/[^/]*$ ]]; then
+              echo "::error title=Ongeldig DEPLOY_PATH::Gebruik een absoluut pad van minstens twee niveaus, bijv. /opt/mijnproject (geen /, geen spaties, geen //, geen . of ..)."
+              fout=1
+            fi
+          fi
+          exit "$fout"
+
+      - name: Node instellen
+        if: env.BUILD != ''
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Bouwen
+        if: env.BUILD != ''
+        run: eval "$BUILD"
+
+      - name: VERSION in sw.js controleren (alleen waarschuwing)
+        if: github.event_name == 'push' && hashFiles('sw.js') != ''
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            echo "Geen vorige commit om mee te vergelijken; controle overgeslagen."
+            exit 0
+          fi
+          # shellcheck disable=SC2086  # SITE_FILES is bewust een lijst
+          gewijzigd="$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- $SITE_FILES | grep -vx 'sw.js' | tr '\n' ' ' || true)"
+          if [ -n "$gewijzigd" ] && ! git diff "$BEFORE" "$GITHUB_SHA" -- sw.js | grep -qE '^[+-]const VERSION'; then
+            echo "::warning title=VERSION niet opgehoogd::Gecachete bestanden zijn gewijzigd (${gewijzigd% }), maar VERSION in sw.js niet. Bestaande installaties zien de wijziging pas later; hoog VERSION op in een volgende commit."
+          else
+            echo "VERSION-controle in orde."
+          fi
+
+      - name: Site-bestanden klaarzetten en ASSETS controleren
+        run: |
+          rm -rf _site
+          mkdir _site
+          # shellcheck disable=SC2086  # SITE_FILES is bewust een lijst
+          cp -R -- $SITE_FILES _site/
+          # Alleen voor een handgeschreven sw.js met een ASSETS-lijst; anders overgeslagen.
+          python3 - <<'PY'
+          import pathlib, re, sys
+          sw = pathlib.Path('_site/sw.js')
+          m = re.search(r"const ASSETS\s*=\s*\[(.*?)\]", sw.read_text(encoding='utf-8'), re.S) if sw.is_file() else None
+          if not m:
+              print("Geen ASSETS-lijst in sw.js; controle overgeslagen.")
+              sys.exit(0)
+          assets = {'index.html' if a in ('./', '.') else a
+                    for a in re.findall(r"['\"]([^'\"]+)['\"]", m.group(1))}
+          site = pathlib.Path('_site')
+          ontbreekt = sorted(a for a in assets if not (site / a).is_file())
+          for a in ontbreekt:
+              print(f"::error title=Ontbreekt in deploy::{a} staat in ASSETS van sw.js maar niet in SITE_FILES (of bestaat niet).")
+          for f in sorted(p.relative_to(site).as_posix() for p in site.rglob('*') if p.is_file()):
+              if f not in assets and f != 'sw.js':
+                  print(f"::warning title=Niet offline beschikbaar::{f} wordt gedeployd maar staat niet in ASSETS van sw.js.")
+          print(f"{len(assets)} ASSETS gecontroleerd.")
+          sys.exit(1 if ontbreekt else 0)
+          PY
+          find _site -type f | sort
+
+      - name: SSH instellen
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts_deploy
+          cat > ~/.ssh/config <<EOF
+          Host deploy-target
+            HostName $DEPLOY_HOST
+            Port ${DEPLOY_PORT:-22}
+            User $DEPLOY_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            UserKnownHostsFile ~/.ssh/known_hosts_deploy
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ConnectTimeout 20
+          EOF
+          p="$(printf '%s' "$DEPLOY_PATH" | sed 's:/*$::')"
+          # $p is door de controlestap beperkt tot [A-Za-z0-9._/-] en wordt bewust hier al ingevuld.
+          # shellcheck disable=SC2029
+          if ! ssh deploy-target "test -d '$p' && test -w '$p'"; then
+            echo "::error title=Server niet bereikbaar of map niet schrijfbaar::Controleer DEPLOY_HOST, DEPLOY_PORT, DEPLOY_USER, DEPLOY_KNOWN_HOSTS, de sleutel, en dat DEPLOY_PATH bestaat en schrijfbaar is."
+            exit 1
+          fi
+          # rsync --delete wist alles in de doelmap: alleen deployen naar een map die als webroot gemarkeerd is.
+          # shellcheck disable=SC2029
+          if ! ssh deploy-target "test -f '$p/.deploy-doel'"; then
+            echo "::error title=Markerbestand ontbreekt::$p/.deploy-doel bestaat niet. Maak het eenmalig aan op de server (zie README) om te bevestigen dat deze map alleen voor de site is."
+            exit 1
+          fi
+
+      - name: Bestanden naar server kopiëren
+        run: |
+          p="$(printf '%s' "$DEPLOY_PATH" | sed 's:/*$::')"
+          # -p met --chmod: ook bestaande bestanden krijgen 644 en mappen 755. De marker blijft altijd staan.
+          # shellcheck disable=SC2054  # de komma hoort bij --chmod
+          opts=(-rltp -O --chmod=D755,F644 --filter='P /.deploy-doel' --itemize-changes)
+          # Fase 1: alles behalve de "ingangen" index.html en sw.js; nog niets verwijderen.
+          rsync "${opts[@]}" --exclude=/index.html --exclude=/sw.js _site/ "deploy-target:$p/"
+          # Fase 2: index.html en sw.js erbij, daarna pas verwijderde bestanden opruimen.
+          rsync "${opts[@]}" --delete-after --delay-updates _site/ "deploy-target:$p/"
+
+      - name: Rooktest
+        if: vars.DEPLOY_URL != ''
+        env:
+          DEPLOY_URL: ${{ vars.DEPLOY_URL }}
+        run: |
+          base="${DEPLOY_URL%/}"
+          verwacht="$(grep -soE "const VERSION = '[^']+'" _site/sw.js | cut -d"'" -f2 || true)"
+          if [ -z "$verwacht" ]; then
+            curl -fsS --max-time 15 -o /dev/null "$base/"
+            echo "Rooktest geslaagd: $base geeft antwoord (geen VERSION in sw.js om te vergelijken)."
+            exit 0
+          fi
+          kreeg=''
+          for i in 1 2 3 4 5; do
+            kreeg="$(curl -fsS --max-time 15 "$base/sw.js?deploy=$GITHUB_SHA" | grep -oE "const VERSION = '[^']+'" | cut -d"'" -f2)" && [ "$kreeg" = "$verwacht" ] && break
+            echo "Poging $i: verwacht '$verwacht', kreeg '$kreeg'; opnieuw over 5 s."
+            sleep 5
+          done
+          if [ "$kreeg" != "$verwacht" ]; then
+            echo "::error title=Rooktest mislukt::De server geeft sw.js met VERSION '$kreeg' in plaats van '$verwacht'."
+            exit 1
+          fi
+          curl -fsS --max-time 15 -o /dev/null "$base/"
+          echo "Rooktest geslaagd: $verwacht staat online."

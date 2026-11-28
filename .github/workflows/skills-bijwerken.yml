@@ -15,12 +15,12 @@ jobs:
   bijwerken:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: |
           grep -v '^#' bronnen.txt | while read -r skill url; do
             [ -n "$skill" ] && curl -fsS "$url" -o "skills/$skill/SKILL.md"
           done
-      - uses: peter-evans/create-pull-request@v7
+      - uses: peter-evans/create-pull-request@v8
         with:
           branch: skills/bijwerken
           commit-message: Skills bijwerken vanaf de bron

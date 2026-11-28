@@ -27,19 +27,17 @@ Dit bestand komt uit `lexdenotter/claude-basis` en wordt in elk project door de 
 Alles draait op de eigen server (een VPS), niet op GitHub Pages of Vercel.
 
 - **Domein**: `lexdenotter.com`, met een wildcard-DNS `*.lexdenotter.com` naar de server. Elk project krijgt één kort subdomein, zoals `egypte.lexdenotter.com`. DNS hoef je daarvoor niet aan te passen.
-- **Caddy** regelt de domeinen en HTTPS. Er is geen nginx of certbot. Caddy draait in Docker als de container `huishoudbot-caddy` en hoort bij de repo `WhatsApp-bot` in `/srv/WhatsApp-bot`.
-  - Een site toevoegen: maak een eigen bestand `/srv/WhatsApp-bot/caddy-sites/<project>.caddy` aan met `<naam>.lexdenotter.com { reverse_proxy <container>:80 }`. Dat bestand staat niet in git.
-  - De projectcontainer moet in het Docker-netwerk `whatsapp-bot_web` hangen. Caddy vindt hem via de containernaam.
-  - Herladen: `cd /srv/WhatsApp-bot && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`. Werkt dat niet, gebruik dan `docker compose up -d --force-recreate caddy`.
-- **Deploy**: na een merge naar `main` kopieert een GitHub Action de bestanden met rsync over SSH naar `/opt/<project>` en doet daarna een rooktest. Die rooktest kijkt via SSH of de nieuwe versie op de server staat; via internet kan dat niet, want de sites zijn alleen via Tailscale bereikbaar. Secrets: `DEPLOY_HOST`, `DEPLOY_PATH`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`. Variables: `DEPLOY_USER`. Nieuw project: kopieer `sync/deploy-rsync.yml` uit `claude-basis` naar `.github/workflows/deploy.yml` en vul `SITE_FILES` (en eventueel `BUILD`) in.
+- **Caddy** regelt de domeinen en HTTPS. Er is geen nginx of certbot. Caddy draait centraal in `/srv/proxy` (container `caddy`, niet in git) en hoort bij geen enkel project. Alle sites zijn alleen via Tailscale bereikbaar.
+  - Een site toevoegen: maak een bestand `/srv/proxy/caddy/sites/<project>.caddy` met `<naam>.lexdenotter.com { import prive ... }`. Het snippet `prive` regelt het certificaat (Cloudflare DNS-01) en blokkeert alles wat niet via Tailscale komt. Voor een container: `reverse_proxy <container>:<poort>`. Voor een statische site: koppel `/opt/<project>` in `/srv/proxy/docker-compose.yml` als `/srv/<project>` en gebruik `root * /srv/<project>` met `file_server` (geen eigen webserver-container nodig).
+  - Een projectcontainer moet in het Docker-netwerk `web` hangen (in compose: `networks: web: external: true, name: web`). Caddy vindt hem via de containernaam.
+  - Herladen: `docker exec caddy caddy reload --config /etc/caddy/Caddyfile`. Een nieuwe site of container moet ook in de controlelijst van `/usr/local/sbin/server-controle`, die elke 5 minuten controleert en een pushmelding stuurt bij een storing.
+- **Deploy**: na een merge naar `main` kopieert een GitHub Action de bestanden met rsync over SSH naar `/opt/<project>` en doet daarna een rooktest. Die rooktest kijkt via SSH of de nieuwe versie op de server staat; via internet kan dat niet, want de sites zijn alleen via Tailscale bereikbaar. Secrets: `DEPLOY_HOST`, `DEPLOY_PATH`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`. Variables: `DEPLOY_USER`. `DEPLOY_HOST` is het publieke IP van de server, geen `*.lexdenotter.com`-naam: die wijst naar het Tailscale-IP, waar GitHub niet bij kan. `DEPLOY_KNOWN_HOSTS` hoort bij dat IP. Nieuw project: kopieer `sync/deploy-rsync.yml` uit `claude-basis` naar `.github/workflows/deploy.yml` en vul `SITE_FILES` (en eventueel `BUILD`) in.
 - **Serverregels**:
   - Nooit `docker compose down -v`, `docker volume rm` of `docker system prune` gebruiken.
-  - In `/srv/WhatsApp-bot` alleen het eigen bestand in `caddy-sites/` aanpassen.
-  - De map niet hernoemen: die naam bepaalt de volumes en het netwerk.
-  - De containers van de huishoudbot (n8n, push) niet herstarten.
-  - Git in die map draai je als `sudo -u lex git`.
+  - In `/srv/proxy` alleen het eigen bestand in `caddy/sites/` aanpassen.
+  - In `/srv/WhatsApp-bot` niets aanpassen en de containers van de huishoudbot (n8n, push) niet herstarten.
   - Een 502 vlak na een herstart: wacht een halve minuut en probeer het opnieuw.
-- **Docs kloppen met de server**: de README en `CLAUDE.md` van een project noemen het echte pad, de echte container en het echte `caddy-sites`-bestand. Pas ze aan als iets op de server verandert.
+- **Docs kloppen met de server**: de README en `CLAUDE.md` van een project noemen het echte pad, de echte container en het echte Caddy-bestand in `/srv/proxy/caddy/sites/`. Pas ze aan als iets op de server verandert.
 - **Domeinwissel**: zet geen redirect van de oude naam, want die breekt API-aanroepen en webhooks. Laat de oude naam een tijd naast de nieuwe draaien, met een einddatum. Een nieuw domein is voor de iPhone een nieuwe site: de app moet opnieuw op het beginscherm, en wat in localStorage stond gaat niet mee.
 
 ## Webapps (PWA)

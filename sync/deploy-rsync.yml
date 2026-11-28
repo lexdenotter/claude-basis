@@ -1,7 +1,7 @@
 # Sjabloon: zet een statische site of PWA bij elke push naar main via SSH + rsync op de eigen server (Caddy).
 # Kopieer naar .github/workflows/deploy.yml in een project en vul hieronder SITE_FILES (en eventueel BUILD) in.
 # Op de server, eenmalig: maak /opt/<project> aan, eigendom van de deploy-gebruiker, met daarin het lege
-# markerbestand .deploy-doel (`touch /opt/<project>/.deploy-doel`), plus een caddy-sites-bestand (zie de basis-CLAUDE.md).
+# markerbestand .deploy-doel (`touch /opt/<project>/.deploy-doel`), plus een Caddy-bestand in /srv/proxy/caddy/sites/ (zie de basis-CLAUDE.md).
 # Secrets: DEPLOY_HOST, DEPLOY_PATH, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS. Variables: DEPLOY_USER, optioneel DEPLOY_PORT.
 name: Deploy naar server
 

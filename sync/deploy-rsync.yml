@@ -2,7 +2,7 @@
 # Kopieer naar .github/workflows/deploy.yml in een project en vul hieronder SITE_FILES (en eventueel BUILD) in.
 # Op de server, eenmalig: maak /opt/<project> aan, eigendom van de deploy-gebruiker, met daarin het lege
 # markerbestand .deploy-doel (`touch /opt/<project>/.deploy-doel`), plus een caddy-sites-bestand (zie de basis-CLAUDE.md).
-# Secrets: DEPLOY_HOST, DEPLOY_PATH, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS. Variables: DEPLOY_USER, DEPLOY_URL, optioneel DEPLOY_PORT.
+# Secrets: DEPLOY_HOST, DEPLOY_PATH, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS. Variables: DEPLOY_USER, optioneel DEPLOY_PORT.
 name: Deploy naar server
 
 on:
@@ -188,26 +188,24 @@ jobs:
           rsync "${opts[@]}" --delete-after --delay-updates _site/ "deploy-target:$p/"
 
       - name: Rooktest
-        if: vars.DEPLOY_URL != ''
-        env:
-          DEPLOY_URL: ${{ vars.DEPLOY_URL }}
+        # De sites zijn alleen via Tailscale bereikbaar, dus de runner kan ze niet via internet openen.
+        # Daarom controleren we via SSH op de server dat de nieuwe versie in de webroot staat.
         run: |
-          base="${DEPLOY_URL%/}"
-          verwacht="$(grep -soE "const VERSION = '[^']+'" _site/sw.js | cut -d"'" -f2 || true)"
-          if [ -z "$verwacht" ]; then
-            curl -fsS --max-time 15 -o /dev/null "$base/"
-            echo "Rooktest geslaagd: $base geeft antwoord (geen VERSION in sw.js om te vergelijken)."
-            exit 0
-          fi
-          kreeg=''
-          for i in 1 2 3 4 5; do
-            kreeg="$(curl -fsS --max-time 15 "$base/sw.js?deploy=$GITHUB_SHA" | grep -oE "const VERSION = '[^']+'" | cut -d"'" -f2)" && [ "$kreeg" = "$verwacht" ] && break
-            echo "Poging $i: verwacht '$verwacht', kreeg '$kreeg'; opnieuw over 5 s."
-            sleep 5
-          done
-          if [ "$kreeg" != "$verwacht" ]; then
-            echo "::error title=Rooktest mislukt::De server geeft sw.js met VERSION '$kreeg' in plaats van '$verwacht'."
+          p="$(printf '%s' "$DEPLOY_PATH" | sed 's:/*$::')"
+          # shellcheck disable=SC2029
+          if ! ssh deploy-target "test -f '$p/index.html'"; then
+            echo "::error title=Rooktest mislukt::$p/index.html staat niet op de server."
             exit 1
           fi
-          curl -fsS --max-time 15 -o /dev/null "$base/"
-          echo "Rooktest geslaagd: $verwacht staat online."
+          verwacht="$(grep -soE "const VERSION = '[^']+'" _site/sw.js | cut -d"'" -f2 || true)"
+          if [ -z "$verwacht" ]; then
+            echo "Rooktest geslaagd: index.html staat op de server (geen VERSION in sw.js om te vergelijken)."
+            exit 0
+          fi
+          # shellcheck disable=SC2029
+          kreeg="$(ssh deploy-target "cat '$p/sw.js'" | grep -oE "const VERSION = '[^']+'" | cut -d"'" -f2 || true)"
+          if [ "$kreeg" != "$verwacht" ]; then
+            echo "::error title=Rooktest mislukt::sw.js op de server heeft VERSION '$kreeg' in plaats van '$verwacht'."
+            exit 1
+          fi
+          echo "Rooktest geslaagd: versie $verwacht staat op de server."
